@@ -1,0 +1,11 @@
+[profile.default]
+src = "contracts"
+out = "out"
+libs = ["lib"]
+solc_version = 0.8.20
+optimizer = true
+optimizer_runs = 200
+
+[rpc_endpoints]
+pharos_testnet = "https://atlantic.dplabs-internal.com"
+pharos_mainnet = "https://rpc.pharos.xyz"

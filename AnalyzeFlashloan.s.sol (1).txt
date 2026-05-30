@@ -1,0 +1,24 @@
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.20;
+import "forge-std/Script.sol";
+import "forge-std/console.sol";
+import "./FlashloanDetector.sol";
+contract AnalyzeFlashloan is Script {
+    function run() external {
+        FlashloanDetector detector = new FlashloanDetector();
+        console.log("=== Pharos Flashloan Detector ===");
+        string memory txHash = vm.envString("TX_HASH");
+        if (bytes(txHash).length > 0) {
+            console.log("Analyzing:", txHash);
+            detector.analyzeTransaction(txHash);
+        }
+        address targetAddress = vm.envAddress("TARGET_ADDR");
+        if (targetAddress != address(0)) {
+            detector.checkAddressRisk(targetAddress);
+        }
+        address contractAddress = vm.envAddress("CONTRACT_ADDR");
+        if (contractAddress != address(0)) {
+            detector.scanContract(contractAddress);
+        }
+    }
+}
