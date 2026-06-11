@@ -1,12 +1,12 @@
 ---
 name: pharos-flashloan-detector
 description: AI Agent skill for detecting flash loan attack patterns on Pharos blockchain. Use this skill whenever a Pharos agent needs to screen a wallet for flashloan activity before copy-trading, lending to, or subscribing to a "yield strategy" wallet. Triggers on phrases like "is this wallet safe", "check for flashloans", "detect exploit patterns", "pharos security check".
-version: 1.1.0
+version: 2.0.0
 author: ruzkypazzy
 requires: read
-bins: [python3, bash]
+bins: [bash, cast, jq]
 network: pharos
-tags: [security, flashloan, pharos, defi, attack-detection, exploit]
+tags: [security, flashloan, pharos, defi, attack-detection, exploit, foundry]
 agents: [claude, codex, gemini, openclaw]
 ---
 
@@ -47,14 +47,16 @@ export PHAROS_RPC=https://rpc.pharos.xyz
 
 ## Prerequisites
 
+Foundry is **required** for this skill. All RPC reads go through `cast`:
+
 ```bash
-python3 --version   # 3.10+
-bash --version      # 4+
+# Install Foundry
+curl -L https://foundry.paradigm.xyz | bash
+foundryup
+cast --version   # should print 0.2.0 or later
 ```
 
-The skill uses only the Python standard library (`urllib.request`,
-`json`, `argparse`). No third-party packages, no Foundry, no
-`pip install` step.
+`jq` is recommended for `--json` mode pretty-printing but not required.
 
 The skill is **read-only** — no private key is required or accepted.
 
