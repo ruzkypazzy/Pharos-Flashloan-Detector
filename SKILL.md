@@ -1,113 +1,126 @@
 ---
 name: pharos-flashloan-detector
-description: AI Agent skill for detecting flash loan attack patterns on Pharos blockchain. Use this skill whenever a Pharos agent needs to screen a wallet for flashloan activity before copy-trading, lending to, or subscribing to a "yield strategy" wallet. Triggers on phrases like "is this wallet safe", "check for flashloans", "detect exploit patterns", "pharos security check".
+description: Security-focused AI agent skill that inspects a Pharos transaction for flash-loan-attack fingerprints (large borrow, oracle manipulation, profit extraction) and reports a 0-100 risk score with a NONE / LOW / MEDIUM / HIGH / CRITICAL verdict. Read-only — never touches a private key. Use this skill whenever an agent needs to screen a wallet for flash-loan exposure before copy-trading, lending, or counterparty interaction.
 version: 2.0.0
 author: ruzkypazzy
 requires: read
 bins: [bash, cast, jq]
 network: pharos
-tags: [security, flashloan, pharos, defi, attack-detection, exploit, foundry]
-agents: [claude, codex, gemini, openclaw]
+tags: [security, flashloan, pharos, defi, attack-detection, exploit, foundry, bash]
 ---
 
 # Pharos Flashloan Detector
 
-Detects and analyzes flash loan attack patterns on Pharos blockchain.
+A bash + cast (Foundry) skill that inspects a single Pharos transaction for the three fingerprints every flash-loan attack leaves on-chain: a borrow from a known provider, a call to a manipulable price oracle in the same atomic tx, and a high log count (proxy for inner-tx burst). Emits a 0-100 risk score plus a five-tier verdict.
 
-## Usage
+## How it scores
 
-```bash
-TX_HASH=0x... forge script AnalyzeFlashloan.s.sol --rpc-url $PHAROS_RPC
-TARGET_ADDR=0x... forge script AnalyzeFlashloan.s.sol --rpc-url $PHAROS_RPC
-CONTRACT_ADDR=0x... forge script AnalyzeFlashloan.s.sol --rpc-url $PHAROS_RPC
+| Signal | Weight |
+|---|---|
+| Outer-call selector matches a known flash-loan provider (Aave V3, Aave V2, Balancer, dYdX, Euler, UniswapV3) | +60 |
+| Outer-call selector matches a known oracle (Chainlink, UniswapV3 observe, UniswapV2 getReserves/getAmountOut) | +25 |
+| Log count >= 5 (proxy for inner-tx burst) | +15 |
+| Status = FAILED (small extra flag) | +5 |
+| **Cap** | 100 |
+
+**Verdict thresholds**: 0-19 NONE, 20-39 LOW, 40-59 MEDIUM, 60-79 HIGH, 80-100 CRITICAL.
+
+## Quick Actions
+
+### Detect a flash-loan attack on a specific tx
+```
+Was transaction 0xabc...def a flash-loan attack on Pharos mainnet?
 ```
 
-## Detection Patterns
+### Run the demo (uses a real public mainnet tx)
+```
+Run the flash-loan detector demo
+```
 
-- Large Value Transfer (+30)
-- Same Block Transactions (+25)
-- Price Manipulation (+35)
-- Reentrancy Pattern (+25)
-- Unauthorized Access (+20)
+### Get the report as JSON (for downstream agent consumption)
+```
+Analyze tx 0xabc...def on Pharos mainnet and return JSON
+```
 
-## Risk Levels
-
-- NONE / LOW / MEDIUM / HIGH / CRITICAL
-
-## Configuration
+## Invocation
 
 ```bash
-export PHAROS_RPC=https://rpc.pharos.xyz
+# Analyze a specific transaction
+bash scripts/detect.sh 0xYOUR_TX_HASH --chain mainnet
+
+# Demo mode (uses a real public mainnet tx as a sample)
+bash scripts/detect.sh demo
+
+# JSON output
+bash scripts/detect.sh 0xYOUR_TX_HASH --json
+
+# Testnet
+bash scripts/detect.sh 0xYOUR_TX_HASH --chain testnet
 ```
+
+## Flags
+
+| Flag | Description |
+|---|---|
+| `<TX_HASH>` | The transaction hash to analyze (positional, required unless `demo`) |
+| `--chain mainnet \| testnet` | Which Pharos chain to read from (default: mainnet) |
+| `--json` | Output as JSON (for agent consumption) |
+| `-h`, `--help` | Show the help text |
+| `demo` | Run on a known public mainnet tx (no args) |
 
 ## Networks
 
-- Mainnet: Chain ID 1672
-- Testnet: Chain ID 688689
+| Network | Chain ID | RPC URL |
+|---|---:|---|
+| mainnet (Pacific Ocean) | 1672 | `https://rpc.pharos.xyz` |
+| atlantic-testnet | 688689 | `https://atlantic.dplabs-internal.com` |
 
-## Prerequisites
+Chain config is read from `assets/networks.json` at startup. Edit that file to add private RPC endpoints.
 
-Foundry is **required** for this skill. All RPC reads go through `cast`:
+## Status extraction (3 branches)
 
-```bash
-# Install Foundry
-curl -L https://foundry.paradigm.xyz | bash
-foundryup
-cast --version   # should print 0.2.0 or later
+The script uses an explicit 3-branch status extraction so it never claims a failed tx without positive evidence:
+
+- `SUCCESS` — raw status is `0x1` or `1`
+- `FAILED` — raw status is `0x0` or `0`
+- `UNKNOWN` — anything else (empty, garbage, or RPC not responding)
+
+If both `status` and `gasUsed` come back empty, the skill reports the tx as not found on the configured chain and lists 4 possible causes (wrong hash, wrong chain, RPC rate-limited, tx too old).
+
+## Dependencies
+
+- **Foundry** (gives you `cast`) — install with `curl -L https://foundry.paradigm.xyz | bash && foundryup`
+- **bash 4+** — preinstalled on macOS, Ubuntu 20+, most Linux
+- **jq** — required only for `--json` output
+
+## Security model
+
+- The skill is **read-only** — it never imports, reads, or stores a private key.
+- It reads tx receipts and tx data via `eth_getTransactionReceipt` / `eth_getTransactionByHash` (read-only RPC).
+- It never submits a transaction, never writes to disk, never phones home.
+- The only network call is to the user-configured RPC URL.
+
+## Error handling
+
+- Missing cast → "Error: 'cast' not found. Install Foundry..."
+- Unknown flag → "Unknown flag: --foo"
+- Bad chain → "Unknown chain: bogus (use 'mainnet' or 'testnet')"
+- Missing tx hash → usage hint + exit 1
+- Tx not on chain → "tx not found on chain=X" + 4 possible causes
+- Empty/garbage status → UNKNOWN branch (never claim FAILED without evidence)
+
+## Repository layout
+
 ```
-
-`jq` is recommended for `--json` mode pretty-printing but not required.
-
-The skill is **read-only** — no private key is required or accepted.
-
-## Network Configuration
-
-Network RPC URLs and chain IDs are sourced from
-`assets/networks.json` (canonical Pharos Skill Engine schema). To
-add a new network, append a new object to the `networks` array and
-update `defaultNetwork` if needed.
-
-## Capability Index
-
-| User Need | Capability | Detailed Instructions |
-|---|---|---|
-| "Did this wallet use a flashloan?" | Per-tx flashloan pattern detection | Run `bash scripts/detect.sh 0xTX_HASH --chain mainnet`; the skill reads the tx receipt, scans logs for `Borrow` events from known providers, and checks for matching `Repay` events in the same atomic call |
-| "Scan a wallet's history" | Bounded wallet scan | Run `python3 detector.py --wallet 0xWALLET --blocks 1000 --format markdown`; the skill walks the last N txs, classifies each, and emits a ranked Markdown/JSON report |
-| "Is this a known flashloan provider?" | Match against selector table | Built-in selector table covers Aave V3, dYdX, Uniswap V3, Balancer; new providers can be added by appending to `FLASHLOAN_SELECTORS` in `detector.py` |
-| "Get the report as JSON for an agent" | `--format json` | Output is structured JSON with `risk_level`, `risk_score`, `indicators[]`, and `verdict` — directly importable by an agent |
-| "Avoid rate limits on the public RPC" | Bounded scan with binary search skip | The `--max-blocks` flag bounds the scan and uses binary-search-with-skip to stay within the public RPC's request rate |
-
-## General Error Handling
-
-| Error Scenario | CLI Error Signature | Handling |
-|---|---|---|
-| Tx hash not on the specified chain | `null` receipt from `eth_getTransactionReceipt` | Exit with "tx not found on chain=X; try `--chain <other>`" |
-| RPC rate-limited (HTTP 429) | Backoff response from RPC | Built-in exponential backoff (0.4s, 0.8s, 1.6s, 3.2s) with 4 retry attempts; surface after exhaustion |
-| Bad tx hash format | `analyze()` rejects malformed input | Python `analyze_rejects_bad_hash_format` test covers this; CLI prints a usage hint |
-| `--wallet` not specified | `analyze()` rejects missing | CLI prints usage; no RPC call is made |
-| No flashloans found (clean wallet) | `verdict: ✓ No flash-loan markers detected.` | Normal case — emit the "no markers" report, no error |
-
-## Security Reminders
-
-- **Private Key Protection** — the skill is read-only and never
-  accepts a private key. Do not paste keys into chat.
-- **Network Confirmation** — before any future write-skill
-  integration, confirm the network with the user.
-- **Wallet Privacy** — a wallet address is a public identifier; do
-  not paste addresses that the user has not explicitly shared.
-
-## Write Operation Pre-checks
-
-This skill is **read-only** and never submits a transaction, so the
-full 4-step write pre-check is not applicable. If a future version
-adds a "blocklist at the RPC level" path, the pre-checks must
-include:
-
-1. **Private Key Check** — `--private-key` / `$PRIVATE_KEY` must be
-   set; warn if the key has zero balance.
-2. **Derive Public Address** — `cast wallet address`; confirm the
-   key is for the intended network.
-3. **Network Confirmation** — prompt the user with "You are about
-   to write to Pacific mainnet. Continue? (y/N)".
-4. **Automatic Balance Check** — `cast balance`; if below the
-   operation cost + gas, abort with a clear error.
+pharos-flashloan-detector/
+├── SKILL.md              # This file
+├── README.md             # Full documentation
+├── foundry.toml          # Minimal config so cast can find the project root
+├── LICENSE               # MIT
+├── assets/
+│   └── networks.json     # mainnet + testnet chain config
+├── scripts/
+│   └── detect.sh         # The single bash script that does the work
+└── tests/
+    └── test_detect_smoke.sh   # Offline smoke test
+```

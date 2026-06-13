@@ -1,11 +1,9 @@
+# Minimal foundry.toml for pharos-flashloan-detector
+# This is an RPC-only analyzer, not a Solidity project, but cast requires
+# a config to find the project root.
 [profile.default]
-src = "contracts"
+src = "scripts"
 out = "out"
-libs = ["lib"]
-solc_version = 0.8.20
+solc = "0.8.24"
 optimizer = true
 optimizer_runs = 200
-
-[rpc_endpoints]
-pharos_testnet = "https://atlantic.dplabs-internal.com"
-pharos_mainnet = "https://rpc.pharos.xyz"

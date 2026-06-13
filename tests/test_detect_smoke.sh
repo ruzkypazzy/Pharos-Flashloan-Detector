@@ -1,44 +1,72 @@
 #!/bin/bash
-# Smoke test for the Foundry/bash port of pharos-flashloan-detector.
-set -e
-SCRIPT="scripts/detect.sh"
+# Smoke test for pharos-flashloan-detector (Foundry/bash port, v2.0.0).
+# Verifies the CLI parses, help text works offline, and error paths are clear.
+set -uo pipefail
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SKILL_DIR="$(dirname "$SCRIPT_DIR")"
+SCRIPT="$SKILL_DIR/scripts/detect.sh"
 
-# Test 1: help flag
-bash "$SCRIPT" --help >/dev/null
+PASS=0
+FAIL=0
 
-# Test 2: no args
-if bash "$SCRIPT" 2>&1 | grep -q "Usage"; then
-  echo "OK: no-args shows usage"
-else
-  echo "FAIL: no-args did not show usage"
-  exit 1
-fi
+# run <name> <expected-substring> -- runs script, checks substring appears in output
+run() {
+  local name="$1"
+  local expected="$2"
+  shift 2
+  local out
+  out=$(bash "$SCRIPT" "$@" 2>&1 || true)
+  if echo "$out" | grep -q "$expected"; then
+    echo "  OK: $name"
+    PASS=$((PASS + 1))
+  else
+    echo "  FAIL: $name"
+    echo "       expected substring: $expected"
+    echo "       actual: $out" | head -3
+    FAIL=$((FAIL + 1))
+  fi
+}
 
-# Test 3: unknown flag
-if bash "$SCRIPT" --foo 2>&1 | grep -q "Unknown flag"; then
-  echo "OK: unknown flag rejected"
-else
-  echo "FAIL: unknown flag not rejected"
-  exit 1
-fi
+echo "Test 1: --help works (no cast required)"
+run "help text present" "Usage:" --help
 
-# Test 4: cast missing (if cast not installed, should fail with the right message)
+echo "Test 2: no args shows usage"
+run "no-args shows usage" "Usage:"
+
+echo "Test 3: unknown flag rejected"
+run "unknown flag rejected" "Unknown flag" --foo
+
+echo "Test 4: bad chain rejected"
+run "bad chain rejected" "Unknown chain" 0xabc --chain bogus
+
+echo "Test 5: cast-missing error is clear (only when cast is not installed)"
 if ! command -v cast >/dev/null 2>&1; then
-  if bash "$SCRIPT" 0xabc --chain mainnet 2>&1 | grep -q "cast.*not found"; then
-    echo "OK: cast-missing error is clear"
+  run "cast-missing error clear" "cast.*not found" 0xabc --chain mainnet
+else
+  echo "  SKIP: cast is installed"
+fi
+
+echo "Test 6: live cast read (only when cast is installed)"
+if command -v cast >/dev/null 2>&1; then
+  run "live cast read produced verdict" "VERDICT: (NONE|LOW|MEDIUM|HIGH|CRITICAL)" \
+    0x9606bcfd027b28e6783ca8b5fef1c3311476a1c30e5bf4464d0340a0d24ba7f7 --chain mainnet
+else
+  echo "  SKIP: cast is not installed"
+fi
+
+echo "Test 7: --json output (only when cast is installed AND jq is installed)"
+if command -v cast >/dev/null 2>&1 && command -v jq >/dev/null 2>&1; then
+  if bash "$SCRIPT" 0x9606bcfd027b28e6783ca8b5fef1c3311476a1c30e5bf4464d0340a0d24ba7f7 --json 2>&1 | jq . >/dev/null; then
+    echo "  OK: json output valid"
+    PASS=$((PASS + 1))
   else
-    echo "FAIL: cast-missing error unclear"
-    exit 1
+    echo "  FAIL: json output invalid"
+    FAIL=$((FAIL + 1))
   fi
 else
-  # Cast installed: try a real mainnet tx
-  if bash "$SCRIPT" 0x9606bcfd027b28e6783ca8b5fef1c3311476a1c30e5bf4464d0340a0d24ba7f7 --chain mainnet 2>&1 | grep -qE "VERDICT: (NONE|LOW|MEDIUM|HIGH|CRITICAL)"; then
-    echo "OK: live cast read worked"
-  else
-    echo "FAIL: live cast read did not produce a verdict"
-    exit 1
-  fi
+  echo "  SKIP: cast or jq not installed"
 fi
 
 echo ""
-echo "All smoke tests passed."
+echo "Results: $PASS passed, $FAIL failed"
+[ "$FAIL" = "0" ] || exit 1
